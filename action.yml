@@ -66,10 +66,13 @@ inputs:
     description: "ArgoCD password"
     required: true
 
+  argocd-cli-version:
+    description: "ArgoCD CLI version to install"
+    required: false
+    default: "2.13.3"
+
 runs:
   using: "composite"
-  env:
-    ARGOCD_CLI_VER: "2.13.3"
   steps:
     - name: Pull image and compute digest
       shell: bash
