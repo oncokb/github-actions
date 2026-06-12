@@ -92,7 +92,7 @@ runs:
         set -euo pipefail
 
         EXPLICIT_VERSION_LEVEL="${{ inputs.version-level }}"
-        RELEASE_LABELS_CONFIG_PATH="$GITHUB_ACTION_PATH/../release-labels.json"
+        RELEASE_LABELS_CONFIG_PATH="$GITHUB_ACTION_PATH/release-labels.json"
         RELEASE_DRAFTER_CONFIG_PATH="${{ inputs.release-drafter-config-path }}"
         RELEASE_DRAFTER_MAJOR="${{ inputs.release-drafter-major-token }}"
         RELEASE_DRAFTER_MINOR="${{ inputs.release-drafter-minor-token }}"
@@ -106,6 +106,7 @@ runs:
 
         mkdir -p "$(dirname "$RELEASE_DRAFTER_CONFIG_PATH")"
         {
+          echo "# Generated from ${GITHUB_ACTION_REPOSITORY:-local}@${GITHUB_ACTION_REF:-local}"
           echo "name-template: '\$NEXT_MINOR_VERSION'"
           echo "tag-template: '\$NEXT_MINOR_VERSION'"
           echo "categories:"

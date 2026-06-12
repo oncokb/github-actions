@@ -2,8 +2,9 @@
 
 Use this composite action to prepare a Release Drafter release from a shared
 workflow. The action checks out the caller repository, generates the shared
-Release Drafter config from `release-labels.json`, looks at merged pull request
-labels since the latest GitHub release, aligns the template to use
+Release Drafter config from `create-release-action/release-labels.json` in the
+same action repo commit/ref the caller used, looks at merged pull request labels
+since the latest GitHub release, aligns the template to use
 `NEXT_MAJOR_VERSION`, `NEXT_MINOR_VERSION`, or `NEXT_PATCH_VERSION`, commits
 that config change when needed, and then runs Release Drafter to create or
 update the release draft.
@@ -75,19 +76,21 @@ latest published GitHub release. Version precedence is:
 If no previous release exists, all merged pull requests are inspected. If no
 matching labels are found, the action uses `default-version-level`.
 
-The label mapping is fixed by the root-level `release-labels.json` file so
+The label mapping is fixed by `create-release-action/release-labels.json` so
 release inference stays in sync with the shared Release Drafter categories.
 
 ## Release Drafter Config
 
-The action generates the shared Release Drafter config from `release-labels.json`
-and writes it into the caller repository before Release Drafter runs:
+The action generates the shared Release Drafter config from
+`create-release-action/release-labels.json` in the downloaded action repo and
+writes it into the caller repository before Release Drafter runs:
 
 ```yaml
+# Generated from oncokb/github-actions@<action-ref>
 name-template: "$NEXT_MINOR_VERSION"
 tag-template: "$NEXT_MINOR_VERSION"
 categories:
-  # Generated from release-labels.json
+  # Generated from create-release-action/release-labels.json
 change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
 template: |
   ## Changes

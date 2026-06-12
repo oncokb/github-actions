@@ -13,7 +13,7 @@ runs:
       run: |
         set -euo pipefail
 
-        RELEASE_LABELS_CONFIG_PATH="$GITHUB_ACTION_PATH/../release-labels.json"
+        RELEASE_LABELS_CONFIG_PATH="$GITHUB_ACTION_PATH/../create-release-action/release-labels.json"
 
         if [[ ! -f "$RELEASE_LABELS_CONFIG_PATH" ]]; then
           echo "Shared release labels config not found." >&2

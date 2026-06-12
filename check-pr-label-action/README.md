@@ -24,5 +24,6 @@ jobs:
 ## Required Labels
 
 The action reads labels directly from the `pull_request` event payload. It does
-not require any inputs. Accepted labels come from the root-level
-`release-labels.json` file.
+not require any inputs. Accepted labels come from
+`create-release-action/release-labels.json` in the same action repo commit/ref
+the caller used.
