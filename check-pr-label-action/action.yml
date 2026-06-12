@@ -20,7 +20,7 @@ runs:
           exit 1
         fi
 
-        REQUIRED_LABELS="$(jq -r '.majorLabels[], .categories[].labels[]' "$RELEASE_LABELS_CONFIG_PATH" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d')"
+        REQUIRED_LABELS="$(jq -r '.categories[].labels[]' "$RELEASE_LABELS_CONFIG_PATH" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d')"
 
         if [[ ! -f "$GITHUB_EVENT_PATH" ]]; then
           echo "GitHub event payload not found." >&2

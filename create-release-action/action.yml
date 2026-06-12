@@ -106,7 +106,7 @@ runs:
             return
           fi
 
-          major_labels="$(jq -r '.majorLabels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_label | sed '/^$/d')"
+          major_labels="$(jq -r '.categories[] | select(.versionLevel == "major") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_label | sed '/^$/d')"
           minor_labels="$(jq -r '.categories[] | select(.versionLevel == "minor") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_label | sed '/^$/d')"
           patch_labels="$(jq -r '.categories[] | select(.versionLevel == "patch") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_label | sed '/^$/d')"
 

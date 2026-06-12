@@ -1,6 +1,10 @@
 {
-  "majorLabels": ["major"],
   "categories": [
+    {
+      "title": "💥 Major Changes",
+      "versionLevel": "major",
+      "labels": ["major"]
+    },
     {
       "title": "🧬 Features",
       "versionLevel": "minor",

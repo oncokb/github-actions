@@ -64,7 +64,7 @@ manual `workflow_dispatch` runs.
 If `version-level` is empty, the action inspects merged pull requests after the
 latest published GitHub release. Version precedence is:
 
-1. labels listed in `majorLabels`
+1. category labels with `versionLevel: major`
 2. category labels with `versionLevel: minor`
 3. category labels with `versionLevel: patch`
 
