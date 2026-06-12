@@ -1,11 +1,11 @@
 # Create Release GitHub Action
 
-Use this composite action to create or update a GitHub release draft from a
-shared release-note definition stored in this repo. The action reads
+Use this composite action to create a GitHub release draft from a shared
+release-note definition stored in this repo. The action deletes existing draft
+releases, reads
 `create-release-action/release-labels.json` from the same action repo commit/ref
 the caller used, infers the next version from merged PR labels, builds
-categorized release notes, and creates or updates the release through the GitHub
-API.
+categorized release notes, and creates the release through the GitHub API.
 
 The caller repository does not need `.github/release-drafter.yml`.
 

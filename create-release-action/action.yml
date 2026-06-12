@@ -237,8 +237,19 @@ runs:
           draft="false"
         fi
 
-        release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-          --jq ".[] | select(.tag_name == \"$next_version\") | .id" | head -n 1 || true)"
+        draft_release_ids="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+          --jq ".[] | select(.draft == true) | .id" || true)"
+
+        if [[ -n "$draft_release_ids" ]]; then
+          while IFS= read -r draft_release_id; do
+            if [[ -n "$draft_release_id" ]]; then
+              echo "Deleting existing draft release $draft_release_id."
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_release_id}" >/dev/null
+            fi
+          done <<< "$draft_release_ids"
+        else
+          echo "No existing draft releases to delete."
+        fi
 
         payload_file="$(mktemp)"
         jq -n \
@@ -256,10 +267,5 @@ runs:
             prerelease: false
           }' > "$payload_file"
 
-        if [[ -n "$release_id" ]]; then
-          echo "Updating release draft for $next_version."
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --input "$payload_file" >/dev/null
-        else
-          echo "Creating release draft for $next_version."
-          gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" --input "$payload_file" >/dev/null
-        fi
+        echo "Creating release for $next_version."
+        gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" --input "$payload_file" >/dev/null
