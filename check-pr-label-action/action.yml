@@ -1,0 +1,47 @@
+name: "Check PR Label"
+description: "Validate that a pull request has at least one required label."
+author: "OncoKB Team"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate required label
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        REQUIRED_LABELS="major,fix,feature,documentation"
+
+        if [[ ! -f "$GITHUB_EVENT_PATH" ]]; then
+          echo "GitHub event payload not found." >&2
+          exit 1
+        fi
+
+        if [[ "$(jq -r 'has("pull_request")' "$GITHUB_EVENT_PATH")" != "true" ]]; then
+          echo "Check PR Label must run on a pull_request event." >&2
+          exit 1
+        fi
+
+        PR_LABELS="$(jq -r '.pull_request.labels[].name' "$GITHUB_EVENT_PATH")"
+
+        echo "Labels:"
+        if [[ -n "$PR_LABELS" ]]; then
+          echo "$PR_LABELS"
+        else
+          echo "(none)"
+        fi
+
+        while IFS= read -r current_label; do
+          case "$current_label" in
+            major|fix|feature|documentation)
+              echo "Required label found: $current_label"
+              exit 0
+              ;;
+          esac
+        done <<< "$PR_LABELS"
+
+        echo "PR must have one of: $REQUIRED_LABELS" >&2
+        exit 1

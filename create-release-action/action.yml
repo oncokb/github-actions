@@ -1,0 +1,255 @@
+name: "Create Release Action"
+description: "Infer the release version level from merged PR labels and create or update a release draft."
+author: "OncoKB Team"
+branding:
+  icon: "tag"
+  color: "blue"
+
+inputs:
+  github-token:
+    description: "Token with contents:write access for committing changes and updating the release draft"
+    required: true
+
+  version-level:
+    description: "Optional explicit release version level. Supported values are major, minor, and patch. Leave empty to infer from merged PR labels."
+    required: false
+    default: ""
+
+  release-drafter-config-path:
+    description: "Path to the Release Drafter config file to update"
+    required: false
+    default: ".github/release-drafter.yml"
+
+  release-drafter-config-name:
+    description: "Release Drafter config name, relative to the .github directory"
+    required: false
+    default: "release-drafter.yml"
+
+  release-drafter-major-token:
+    description: "Placeholder used by Release Drafter for the next major version"
+    required: false
+    default: "NEXT_MAJOR_VERSION"
+
+  release-drafter-minor-token:
+    description: "Placeholder used by Release Drafter for the next minor version"
+    required: false
+    default: "NEXT_MINOR_VERSION"
+
+  release-drafter-patch-token:
+    description: "Placeholder used by Release Drafter for the next patch version"
+    required: false
+    default: "NEXT_PATCH_VERSION"
+
+  major-labels:
+    description: "Comma-separated PR labels that should trigger a major release"
+    required: false
+    default: "major"
+
+  minor-labels:
+    description: "Comma-separated PR labels that should trigger a minor release"
+    required: false
+    default: "feature"
+
+  patch-labels:
+    description: "Comma-separated PR labels that should trigger a patch release"
+    required: false
+    default: "fix,documentation"
+
+  default-version-level:
+    description: "Version level to use when no merged PR labels match"
+    required: false
+    default: "patch"
+
+  git-user-name:
+    description: "Git user.name for commits"
+    required: false
+    default: "oncokb-bot"
+
+  git-user-email:
+    description: "Git user.email for commits"
+    required: false
+    default: "dev.oncokb@gmail.com"
+
+  target-branch:
+    description: "Branch to push Release Drafter config updates to. Defaults to the current ref name."
+    required: false
+    default: ""
+
+  commit-message-prefix:
+    description: "Prefix for the commit message when the Release Drafter config changes"
+    required: false
+    default: "Update action files to align the version level to"
+
+  run-release-drafter:
+    description: "Whether to run Release Drafter after aligning the config"
+    required: false
+    default: "true"
+
+  publish:
+    description: "Whether Release Drafter should publish the release instead of only creating or updating a draft"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ inputs.github-token }}
+
+    - name: Align Release Drafter version level
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        EXPLICIT_VERSION_LEVEL="${{ inputs.version-level }}"
+        RELEASE_DRAFTER_CONFIG_PATH="${{ inputs.release-drafter-config-path }}"
+        RELEASE_DRAFTER_MAJOR="${{ inputs.release-drafter-major-token }}"
+        RELEASE_DRAFTER_MINOR="${{ inputs.release-drafter-minor-token }}"
+        RELEASE_DRAFTER_PATCH="${{ inputs.release-drafter-patch-token }}"
+        MAJOR_LABELS="${{ inputs.major-labels }}"
+        MINOR_LABELS="${{ inputs.minor-labels }}"
+        PATCH_LABELS="${{ inputs.patch-labels }}"
+        DEFAULT_VERSION_LEVEL="${{ inputs.default-version-level }}"
+
+        if [[ ! -f "$RELEASE_DRAFTER_CONFIG_PATH" ]]; then
+          echo "Release Drafter config not found: $RELEASE_DRAFTER_CONFIG_PATH" >&2
+          exit 1
+        fi
+
+        normalize_list() {
+          echo "$1" | tr "[:upper:]" "[:lower:]" | tr "," "\n" | xargs -n1 echo 2>/dev/null || true
+        }
+
+        label_matches() {
+          local label="$1"
+          local candidates="$2"
+          while IFS= read -r candidate; do
+            if [[ -n "$candidate" && "$label" == "$candidate" ]]; then
+              return 0
+            fi
+          done <<< "$candidates"
+          return 1
+        }
+
+        infer_version_level_from_labels() {
+          local latest_release_date=""
+          local latest_release_day=""
+          local search_query="repo:${GITHUB_REPOSITORY} is:pr is:merged"
+          local labels=""
+          local major_labels minor_labels patch_labels
+
+          major_labels="$(normalize_list "$MAJOR_LABELS")"
+          minor_labels="$(normalize_list "$MINOR_LABELS")"
+          patch_labels="$(normalize_list "$PATCH_LABELS")"
+
+          latest_release_date="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq ".published_at" 2>/dev/null || true)"
+
+          if [[ -n "$latest_release_date" && "$latest_release_date" != "null" ]]; then
+            latest_release_day="${latest_release_date%%T*}"
+            search_query="$search_query merged:>$latest_release_day"
+            echo "Latest release published at: $latest_release_date"
+          else
+            echo "No previous release found. Inspecting all merged pull requests."
+          fi
+
+          labels="$(gh api -X GET --paginate "search/issues" -f q="$search_query" --jq ".items[].labels[].name" | tr "[:upper:]" "[:lower:]" || true)"
+
+          if [[ -z "$labels" ]]; then
+            echo "No merged PR labels found. Using default version level '$DEFAULT_VERSION_LEVEL'." >&2
+            VERSION_LEVEL="$DEFAULT_VERSION_LEVEL"
+            return
+          fi
+
+          while IFS= read -r label; do
+            label="$(echo "$label" | xargs)"
+            if label_matches "$label" "$major_labels"; then
+              VERSION_LEVEL="major"
+              return
+            fi
+          done <<< "$labels"
+
+          while IFS= read -r label; do
+            label="$(echo "$label" | xargs)"
+            if label_matches "$label" "$minor_labels"; then
+              VERSION_LEVEL="minor"
+              return
+            fi
+          done <<< "$labels"
+
+          while IFS= read -r label; do
+            label="$(echo "$label" | xargs)"
+            if label_matches "$label" "$patch_labels"; then
+              VERSION_LEVEL="patch"
+              return
+            fi
+          done <<< "$labels"
+
+          echo "No release labels matched. Using default version level '$DEFAULT_VERSION_LEVEL'." >&2
+          VERSION_LEVEL="$DEFAULT_VERSION_LEVEL"
+        }
+
+        EXPLICIT_VERSION_LEVEL="$(echo "$EXPLICIT_VERSION_LEVEL" | tr "[:upper:]" "[:lower:]" | tr -d "[:space:]")"
+
+        if [[ -n "$EXPLICIT_VERSION_LEVEL" ]]; then
+          VERSION_LEVEL="$EXPLICIT_VERSION_LEVEL"
+          echo "Using explicit version level: $VERSION_LEVEL"
+        else
+          infer_version_level_from_labels
+        fi
+
+        case "$VERSION_LEVEL" in
+          major)
+            FROM="$RELEASE_DRAFTER_MINOR,$RELEASE_DRAFTER_PATCH" TO="$RELEASE_DRAFTER_MAJOR" perl -0pi -e 'BEGIN { @from = map { quotemeta($_) } split(",", $ENV{"FROM"}); $to = $ENV{"TO"} } for $from (@from) { s/$from/$to/gi }' "$RELEASE_DRAFTER_CONFIG_PATH"
+            ;;
+          minor)
+            FROM="$RELEASE_DRAFTER_MAJOR,$RELEASE_DRAFTER_PATCH" TO="$RELEASE_DRAFTER_MINOR" perl -0pi -e 'BEGIN { @from = map { quotemeta($_) } split(",", $ENV{"FROM"}); $to = $ENV{"TO"} } for $from (@from) { s/$from/$to/gi }' "$RELEASE_DRAFTER_CONFIG_PATH"
+            ;;
+          patch)
+            FROM="$RELEASE_DRAFTER_MAJOR,$RELEASE_DRAFTER_MINOR" TO="$RELEASE_DRAFTER_PATCH" perl -0pi -e 'BEGIN { @from = map { quotemeta($_) } split(",", $ENV{"FROM"}); $to = $ENV{"TO"} } for $from (@from) { s/$from/$to/gi }' "$RELEASE_DRAFTER_CONFIG_PATH"
+            ;;
+          *)
+            echo "Unsupported version level '$VERSION_LEVEL'. Expected 'major', 'minor', or 'patch'." >&2
+            exit 1
+            ;;
+        esac
+
+        echo "Resolved version level: $VERSION_LEVEL"
+        echo "VERSION_LEVEL=$VERSION_LEVEL" >> "$GITHUB_ENV"
+
+    - name: Commit Release Drafter config update
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        RELEASE_DRAFTER_CONFIG_PATH="${{ inputs.release-drafter-config-path }}"
+        TARGET_BRANCH="${{ inputs.target-branch }}"
+
+        if [[ -z "$TARGET_BRANCH" ]]; then
+          TARGET_BRANCH="$GITHUB_REF_NAME"
+        fi
+
+        CHANGED=$(git diff --name-only -- "$RELEASE_DRAFTER_CONFIG_PATH")
+
+        if [[ -n "$CHANGED" ]]; then
+          git config user.name "${{ inputs.git-user-name }}"
+          git config user.email "${{ inputs.git-user-email }}"
+          git add "$RELEASE_DRAFTER_CONFIG_PATH"
+          git commit -m "${{ inputs.commit-message-prefix }} $VERSION_LEVEL"
+          git push origin "HEAD:$TARGET_BRANCH"
+        else
+          echo "Release Drafter config already matches version level '$VERSION_LEVEL'."
+        fi
+
+    - name: Create or update release draft
+      if: ${{ inputs.run-release-drafter == 'true' }}
+      uses: release-drafter/release-drafter@v6
+      with:
+        config-name: ${{ inputs.release-drafter-config-name }}
+        publish: ${{ inputs.publish }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
