@@ -1,10 +1,11 @@
 # Create Release GitHub Action
 
 Use this composite action to prepare a Release Drafter release from a shared
-workflow. The action checks out the caller repository, generates the shared
-Release Drafter config from `create-release-action/release-labels.json` in the
-same action repo commit/ref the caller used, looks at merged pull request labels
-since the latest GitHub release, aligns the template to use
+workflow. The action resolves and checks out the caller repository's default
+branch, generates the shared Release Drafter config from
+`create-release-action/release-labels.json` in the same action repo commit/ref
+the caller used, looks at merged pull request labels since the latest GitHub
+release, aligns the template to use
 `NEXT_MAJOR_VERSION`, `NEXT_MINOR_VERSION`, or `NEXT_PATCH_VERSION`, commits
 that config change when needed, and then runs Release Drafter to create or
 update the release draft.
@@ -57,7 +58,7 @@ jobs:
 | `release-drafter-major-token`, `release-drafter-minor-token`, `release-drafter-patch-token` | No       | Placeholder values used in the Release Drafter config. Defaults match the OncoKB release config.                                    |
 | `default-version-level`                                                                     | No       | Version level to use when no merged PR labels match. Defaults to `patch`.                                                           |
 | `git-user-name`, `git-user-email`                                                           | No       | Git identity used when committing the config update.                                                                                |
-| `target-branch`                                                                             | No       | Branch to push config updates to. Defaults to the current ref name.                                                                 |
+| `target-branch`                                                                             | No       | Branch to push config updates to. Defaults to the repository default branch. Must be the default branch when `run-release-drafter` is `true`. |
 | `run-release-drafter`                                                                       | No       | Set to `false` to only align and commit the Release Drafter config.                                                                 |
 | `publish`                                                                                   | No       | Set to `true` to have Release Drafter publish the release instead of leaving it as a draft.                                         |
 
@@ -105,3 +106,8 @@ template: |
 When the inferred level is `major`, the action rewrites the config to use
 `NEXT_MAJOR_VERSION`. `minor` uses `NEXT_MINOR_VERSION`, and `patch` uses
 `NEXT_PATCH_VERSION`.
+
+Release Drafter reads `.github/release-drafter.yml` from the repository default
+branch through GitHub's API. The action commits the generated config to the
+default branch and waits until GitHub can read it before invoking Release
+Drafter.
