@@ -1,14 +1,13 @@
 # Create Release GitHub Action
 
-Use this composite action to prepare a Release Drafter release from a shared
-workflow. The action resolves and checks out the caller repository's default
-branch, generates the shared Release Drafter config from
-`create-release-action/release-labels.json` in the same action repo commit/ref
-the caller used, looks at merged pull request labels since the latest GitHub
-release, aligns the template to use
-`NEXT_MAJOR_VERSION`, `NEXT_MINOR_VERSION`, or `NEXT_PATCH_VERSION`, commits
-that config change when needed, and then runs Release Drafter to create or
-update the release draft.
+Use this composite action to create or update a GitHub release draft from a
+shared release-note definition stored in this repo. The action reads
+`create-release-action/release-labels.json` from the same action repo commit/ref
+the caller used, infers the next version from merged PR labels, builds
+categorized release notes, and creates or updates the release through the GitHub
+API.
+
+The caller repository does not need `.github/release-drafter.yml`.
 
 ## Usage
 
@@ -49,18 +48,13 @@ jobs:
 
 ## Key Inputs
 
-| Input                                                                                       | Required | Description                                                                                                                         |
-| ------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`                                                                              | Yes      | Token with permission to push commits and create or update the release draft.                                                       |
-| `version-level`                                                                             | No       | Explicit release version level for manual runs. Supports `major`, `minor`, and `patch`. Leave empty to infer from merged PR labels. |
-| `release-drafter-config-path`                                                               | No       | Path where the shared Release Drafter config should be written. Defaults to `.github/release-drafter.yml`.                          |
-| `release-drafter-config-name`                                                               | No       | Config name passed to Release Drafter. Defaults to `release-drafter.yml`.                                                           |
-| `release-drafter-major-token`, `release-drafter-minor-token`, `release-drafter-patch-token` | No       | Placeholder values used in the Release Drafter config. Defaults match the OncoKB release config.                                    |
-| `default-version-level`                                                                     | No       | Version level to use when no merged PR labels match. Defaults to `patch`.                                                           |
-| `git-user-name`, `git-user-email`                                                           | No       | Git identity used when committing the config update.                                                                                |
-| `target-branch`                                                                             | No       | Branch to push config updates to. Defaults to the repository default branch. Must be the default branch when `run-release-drafter` is `true`. |
-| `run-release-drafter`                                                                       | No       | Set to `false` to only align and commit the Release Drafter config.                                                                 |
-| `publish`                                                                                   | No       | Set to `true` to have Release Drafter publish the release instead of leaving it as a draft.                                         |
+| Input | Required | Description |
+| --- | --- | --- |
+| `github-token` | Yes | Token with permission to create or update releases. |
+| `version-level` | No | Explicit release version level for manual runs. Supports `major`, `minor`, and `patch`. Leave empty to infer from merged PR labels. |
+| `default-version-level` | No | Version level to use when no merged PR labels match. Defaults to `patch`. |
+| `target-branch` | No | Target branch or commitish for the release. Defaults to the repository default branch. |
+| `publish` | No | Set to `true` to publish the release instead of leaving it as a draft. |
 
 ## Version Level
 
@@ -77,37 +71,21 @@ latest published GitHub release. Version precedence is:
 If no previous release exists, all merged pull requests are inspected. If no
 matching labels are found, the action uses `default-version-level`.
 
-The label mapping is fixed by `create-release-action/release-labels.json` so
-release inference stays in sync with the shared Release Drafter categories.
+## Release Notes
 
-## Release Drafter Config
+Release note categories and accepted labels are defined in
+`create-release-action/release-labels.json`. Updating that one file changes both
+release-note generation and PR label validation.
 
-The action generates the shared Release Drafter config from
-`create-release-action/release-labels.json` in the downloaded action repo and
-writes it into the caller repository before Release Drafter runs:
+The generated release body uses:
 
-```yaml
-# Generated from oncokb/github-actions@<action-ref>
-name-template: "$NEXT_MINOR_VERSION"
-tag-template: "$NEXT_MINOR_VERSION"
-categories:
-  # Generated from create-release-action/release-labels.json
-change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
-template: |
-  ## Changes
+```markdown
+## Changes
 
-  $CHANGES
+### <category title>
+- <PR title> @<author> (#<number>)
 
-  ## 🕵️‍♀️ Full commit logs
+## 🕵️‍♀️ Full commit logs
 
-  - https://github.com/<caller-repo>/compare/$PREVIOUS_TAG...$NEXT_MINOR_VERSION
+- https://github.com/<caller-repo>/compare/<previous-tag>...<next-version>
 ```
-
-When the inferred level is `major`, the action rewrites the config to use
-`NEXT_MAJOR_VERSION`. `minor` uses `NEXT_MINOR_VERSION`, and `patch` uses
-`NEXT_PATCH_VERSION`.
-
-Release Drafter reads `.github/release-drafter.yml` from the repository default
-branch through GitHub's API. The action commits the generated config to the
-default branch and waits until GitHub can read it before invoking Release
-Drafter.

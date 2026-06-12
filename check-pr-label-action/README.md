@@ -1,7 +1,7 @@
 # Check PR Label GitHub Action
 
 Use this composite action to require pull requests to include one of the release
-category labels used by the shared Release Drafter template.
+category labels defined by the shared release label config.
 
 ## Usage
 

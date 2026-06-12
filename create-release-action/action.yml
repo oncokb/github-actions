@@ -1,5 +1,5 @@
 name: "Create Release Action"
-description: "Infer the release version level from merged PR labels and create or update a release draft."
+description: "Infer the release version level from merged PR labels and create or update a GitHub release draft."
 author: "OncoKB Team"
 branding:
   icon: "tag"
@@ -7,7 +7,7 @@ branding:
 
 inputs:
   github-token:
-    description: "Token with contents:write access for committing changes and updating the release draft"
+    description: "Token with contents:write access for creating or updating the release draft"
     required: true
 
   version-level:
@@ -15,125 +15,44 @@ inputs:
     required: false
     default: ""
 
-  release-drafter-config-path:
-    description: "Path where the shared Release Drafter config should be written"
-    required: false
-    default: ".github/release-drafter.yml"
-
-  release-drafter-config-name:
-    description: "Release Drafter config name, relative to the .github directory"
-    required: false
-    default: "release-drafter.yml"
-
-  release-drafter-major-token:
-    description: "Placeholder used by Release Drafter for the next major version"
-    required: false
-    default: "NEXT_MAJOR_VERSION"
-
-  release-drafter-minor-token:
-    description: "Placeholder used by Release Drafter for the next minor version"
-    required: false
-    default: "NEXT_MINOR_VERSION"
-
-  release-drafter-patch-token:
-    description: "Placeholder used by Release Drafter for the next patch version"
-    required: false
-    default: "NEXT_PATCH_VERSION"
-
   default-version-level:
     description: "Version level to use when no merged PR labels match"
     required: false
     default: "patch"
 
-  git-user-name:
-    description: "Git user.name for commits"
-    required: false
-    default: "oncokb-bot"
-
-  git-user-email:
-    description: "Git user.email for commits"
-    required: false
-    default: "dev.oncokb@gmail.com"
-
   target-branch:
-    description: "Branch to push Release Drafter config updates to. Defaults to the repository default branch. Must be the default branch when run-release-drafter is true."
+    description: "Target branch or commitish for the release. Defaults to the repository default branch."
     required: false
     default: ""
 
-  commit-message-prefix:
-    description: "Prefix for the commit message when the Release Drafter config changes"
-    required: false
-    default: "Update action files to align the version level to"
-
-  run-release-drafter:
-    description: "Whether to run Release Drafter after aligning the config"
-    required: false
-    default: "true"
-
   publish:
-    description: "Whether Release Drafter should publish the release instead of only creating or updating a draft"
+    description: "Whether to publish the release instead of leaving it as a draft"
     required: false
     default: "false"
 
 runs:
   using: "composite"
   steps:
-    - name: Resolve default branch
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: |
-        set -euo pipefail
-        DEFAULT_BRANCH="$(gh api "repos/${GITHUB_REPOSITORY}" --jq ".default_branch")"
-        echo "DEFAULT_BRANCH=$DEFAULT_BRANCH" >> "$GITHUB_ENV"
-
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        ref: ${{ env.DEFAULT_BRANCH }}
-        token: ${{ inputs.github-token }}
-
-    - name: Align Release Drafter version level
+    - name: Create or update release
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
 
-        EXPLICIT_VERSION_LEVEL="${{ inputs.version-level }}"
         RELEASE_LABELS_CONFIG_PATH="$GITHUB_ACTION_PATH/release-labels.json"
-        RELEASE_DRAFTER_CONFIG_PATH="${{ inputs.release-drafter-config-path }}"
-        RELEASE_DRAFTER_MAJOR="${{ inputs.release-drafter-major-token }}"
-        RELEASE_DRAFTER_MINOR="${{ inputs.release-drafter-minor-token }}"
-        RELEASE_DRAFTER_PATCH="${{ inputs.release-drafter-patch-token }}"
+        EXPLICIT_VERSION_LEVEL="${{ inputs.version-level }}"
         DEFAULT_VERSION_LEVEL="${{ inputs.default-version-level }}"
+        TARGET_BRANCH="${{ inputs.target-branch }}"
+        PUBLISH="${{ inputs.publish }}"
 
         if [[ ! -f "$RELEASE_LABELS_CONFIG_PATH" ]]; then
           echo "Shared release labels config not found." >&2
           exit 1
         fi
 
-        mkdir -p "$(dirname "$RELEASE_DRAFTER_CONFIG_PATH")"
-        {
-          echo "# Generated from ${GITHUB_ACTION_REPOSITORY:-local}@${GITHUB_ACTION_REF:-local}"
-          echo "name-template: '\$NEXT_MINOR_VERSION'"
-          echo "tag-template: '\$NEXT_MINOR_VERSION'"
-          echo "categories:"
-          jq -r '.categories[] | "  - title: " + (.title | @json), "    labels:", (.labels[] | "      - " + (. | @json))' "$RELEASE_LABELS_CONFIG_PATH"
-          echo "change-template: '- \$TITLE @\$AUTHOR (#\$NUMBER)'"
-          echo "template: |"
-          echo "  ## Changes"
-          echo
-          echo "  \$CHANGES"
-          echo
-          echo "  ## 🕵️‍♀️ Full commit logs"
-          echo
-          echo "  - https://github.com/$GITHUB_REPOSITORY/compare/\$PREVIOUS_TAG...\$NEXT_MINOR_VERSION"
-        } > "$RELEASE_DRAFTER_CONFIG_PATH"
-
-        normalize_labels() {
-          tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d'
+        normalize_label() {
+          tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
         }
 
         label_matches() {
@@ -147,28 +66,39 @@ runs:
           return 1
         }
 
+        DEFAULT_BRANCH="$(gh api "repos/${GITHUB_REPOSITORY}" --jq ".default_branch")"
+        if [[ -z "$TARGET_BRANCH" ]]; then
+          TARGET_BRANCH="$DEFAULT_BRANCH"
+        fi
+
+        latest_release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null || true)"
+        previous_tag=""
+        latest_release_date=""
+
+        if [[ -n "$latest_release_json" ]]; then
+          previous_tag="$(jq -r ".tag_name // empty" <<< "$latest_release_json")"
+          latest_release_date="$(jq -r ".published_at // .created_at // empty" <<< "$latest_release_json")"
+        fi
+
+        search_query="repo:${GITHUB_REPOSITORY} is:pr is:merged"
+        if [[ -n "$latest_release_date" ]]; then
+          latest_release_day="${latest_release_date%%T*}"
+          search_query="$search_query merged:>$latest_release_day"
+          echo "Latest release: $previous_tag ($latest_release_date)"
+        else
+          echo "No previous release found. Inspecting all merged pull requests."
+        fi
+
+        prs_file="$(mktemp)"
+        gh api -X GET --paginate "search/issues" -f q="$search_query" \
+          --jq '.items[] | {number, title, author: .user.login, labels: [.labels[].name]}' \
+          | jq -s '.' > "$prs_file"
+
         infer_version_level_from_labels() {
-          local latest_release_date=""
-          local latest_release_day=""
-          local search_query="repo:${GITHUB_REPOSITORY} is:pr is:merged"
           local labels=""
           local major_labels minor_labels patch_labels
 
-          major_labels="$(jq -r '.majorLabels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_labels)"
-          minor_labels="$(jq -r '.categories[] | select(.versionLevel == "minor") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_labels)"
-          patch_labels="$(jq -r '.categories[] | select(.versionLevel == "patch") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_labels)"
-
-          latest_release_date="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq ".published_at" 2>/dev/null || true)"
-
-          if [[ -n "$latest_release_date" && "$latest_release_date" != "null" ]]; then
-            latest_release_day="${latest_release_date%%T*}"
-            search_query="$search_query merged:>$latest_release_day"
-            echo "Latest release published at: $latest_release_date"
-          else
-            echo "No previous release found. Inspecting all merged pull requests."
-          fi
-
-          labels="$(gh api -X GET --paginate "search/issues" -f q="$search_query" --jq ".items[].labels[].name" | tr "[:upper:]" "[:lower:]" || true)"
+          labels="$(jq -r '.[].labels[]?' "$prs_file" | normalize_label | sed '/^$/d' || true)"
 
           if [[ -z "$labels" ]]; then
             echo "No merged PR labels found. Using default version level '$DEFAULT_VERSION_LEVEL'." >&2
@@ -176,8 +106,11 @@ runs:
             return
           fi
 
+          major_labels="$(jq -r '.majorLabels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_label | sed '/^$/d')"
+          minor_labels="$(jq -r '.categories[] | select(.versionLevel == "minor") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_label | sed '/^$/d')"
+          patch_labels="$(jq -r '.categories[] | select(.versionLevel == "patch") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_label | sed '/^$/d')"
+
           while IFS= read -r label; do
-            label="$(echo "$label" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             if label_matches "$label" "$major_labels"; then
               VERSION_LEVEL="major"
               return
@@ -185,7 +118,6 @@ runs:
           done <<< "$labels"
 
           while IFS= read -r label; do
-            label="$(echo "$label" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             if label_matches "$label" "$minor_labels"; then
               VERSION_LEVEL="minor"
               return
@@ -193,7 +125,6 @@ runs:
           done <<< "$labels"
 
           while IFS= read -r label; do
-            label="$(echo "$label" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             if label_matches "$label" "$patch_labels"; then
               VERSION_LEVEL="patch"
               return
@@ -204,7 +135,7 @@ runs:
           VERSION_LEVEL="$DEFAULT_VERSION_LEVEL"
         }
 
-        EXPLICIT_VERSION_LEVEL="$(echo "$EXPLICIT_VERSION_LEVEL" | tr "[:upper:]" "[:lower:]" | tr -d "[:space:]")"
+        EXPLICIT_VERSION_LEVEL="$(echo "$EXPLICIT_VERSION_LEVEL" | normalize_label | tr -d "[:space:]")"
 
         if [[ -n "$EXPLICIT_VERSION_LEVEL" ]]; then
           VERSION_LEVEL="$EXPLICIT_VERSION_LEVEL"
@@ -214,14 +145,7 @@ runs:
         fi
 
         case "$VERSION_LEVEL" in
-          major)
-            FROM="$RELEASE_DRAFTER_MINOR,$RELEASE_DRAFTER_PATCH" TO="$RELEASE_DRAFTER_MAJOR" perl -0pi -e 'BEGIN { @from = map { quotemeta($_) } split(",", $ENV{"FROM"}); $to = $ENV{"TO"} } for $from (@from) { s/$from/$to/gi }' "$RELEASE_DRAFTER_CONFIG_PATH"
-            ;;
-          minor)
-            FROM="$RELEASE_DRAFTER_MAJOR,$RELEASE_DRAFTER_PATCH" TO="$RELEASE_DRAFTER_MINOR" perl -0pi -e 'BEGIN { @from = map { quotemeta($_) } split(",", $ENV{"FROM"}); $to = $ENV{"TO"} } for $from (@from) { s/$from/$to/gi }' "$RELEASE_DRAFTER_CONFIG_PATH"
-            ;;
-          patch)
-            FROM="$RELEASE_DRAFTER_MAJOR,$RELEASE_DRAFTER_MINOR" TO="$RELEASE_DRAFTER_PATCH" perl -0pi -e 'BEGIN { @from = map { quotemeta($_) } split(",", $ENV{"FROM"}); $to = $ENV{"TO"} } for $from (@from) { s/$from/$to/gi }' "$RELEASE_DRAFTER_CONFIG_PATH"
+          major|minor|patch)
             ;;
           *)
             echo "Unsupported version level '$VERSION_LEVEL'. Expected 'major', 'minor', or 'patch'." >&2
@@ -229,73 +153,113 @@ runs:
             ;;
         esac
 
-        echo "Resolved version level: $VERSION_LEVEL"
-        echo "VERSION_LEVEL=$VERSION_LEVEL" >> "$GITHUB_ENV"
+        version_prefix=""
+        base_version="0.0.0"
 
-    - name: Commit Release Drafter config update
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: |
-        set -euo pipefail
-
-        RELEASE_DRAFTER_CONFIG_PATH="${{ inputs.release-drafter-config-path }}"
-        TARGET_BRANCH="${{ inputs.target-branch }}"
-        RUN_RELEASE_DRAFTER="${{ inputs.run-release-drafter }}"
-        DEFAULT_BRANCH="${DEFAULT_BRANCH:-$(gh api "repos/${GITHUB_REPOSITORY}" --jq ".default_branch")}"
-
-        if [[ -z "$TARGET_BRANCH" ]]; then
-          TARGET_BRANCH="$DEFAULT_BRANCH"
+        if [[ -n "$previous_tag" ]]; then
+          if [[ "$previous_tag" == v* ]]; then
+            version_prefix="v"
+            base_version="${previous_tag#v}"
+          else
+            base_version="$previous_tag"
+          fi
         fi
 
-        if [[ "$RUN_RELEASE_DRAFTER" == "true" && "$TARGET_BRANCH" != "$DEFAULT_BRANCH" ]]; then
-          echo "Release Drafter requires $RELEASE_DRAFTER_CONFIG_PATH to exist on the default branch '$DEFAULT_BRANCH'." >&2
-          echo "Set target-branch to '$DEFAULT_BRANCH' or set run-release-drafter to false." >&2
+        if [[ ! "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Latest release tag '$previous_tag' is not a simple semantic version." >&2
           exit 1
         fi
 
-        CHANGED=$(git diff --name-only -- "$RELEASE_DRAFTER_CONFIG_PATH")
+        IFS='.' read -r major minor patch <<< "$base_version"
 
-        if [[ -n "$CHANGED" ]]; then
-          git config user.name "${{ inputs.git-user-name }}"
-          git config user.email "${{ inputs.git-user-email }}"
-          git add "$RELEASE_DRAFTER_CONFIG_PATH"
-          git commit -m "${{ inputs.commit-message-prefix }} $VERSION_LEVEL"
-          git push origin "HEAD:$TARGET_BRANCH"
-        else
-          echo "Release Drafter config already matches version level '$VERSION_LEVEL'."
-        fi
+        case "$VERSION_LEVEL" in
+          major)
+            major=$((major + 1))
+            minor=0
+            patch=0
+            ;;
+          minor)
+            minor=$((minor + 1))
+            patch=0
+            ;;
+          patch)
+            patch=$((patch + 1))
+            ;;
+        esac
 
-        echo "DEFAULT_BRANCH=$DEFAULT_BRANCH" >> "$GITHUB_ENV"
+        next_version="${version_prefix}${major}.${minor}.${patch}"
+        echo "Resolved version level: $VERSION_LEVEL"
+        echo "Next version: $next_version"
 
-    - name: Wait for Release Drafter config
-      if: ${{ inputs.run-release-drafter == 'true' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: |
-        set -euo pipefail
+        body_file="$(mktemp)"
+        changes_file="$(mktemp)"
 
-        RELEASE_DRAFTER_CONFIG_PATH="${{ inputs.release-drafter-config-path }}"
+        jq -r --slurpfile prs "$prs_file" '
+          def norm: ascii_downcase | gsub("^\\s+|\\s+$"; "");
+          def has_any_label($wanted):
+            (.labels // [] | map(norm)) as $labels
+            | any($wanted[]; . as $label | $labels | index($label));
 
-        for attempt in {1..10}; do
-          if gh api -X GET "repos/${GITHUB_REPOSITORY}/contents/${RELEASE_DRAFTER_CONFIG_PATH}" -f ref="$DEFAULT_BRANCH" --jq ".sha" >/dev/null 2>&1; then
-            echo "Release Drafter config is available on $DEFAULT_BRANCH."
-            exit 0
+          $prs[0] as $all_prs
+          | .categories[]
+          | . as $category
+          | ($category.labels | map(norm)) as $wanted
+          | [$all_prs[] | select(has_any_label($wanted))]
+          | unique_by(.number)
+          | if length > 0 then
+              "### " + $category.title,
+              (.[] | "- " + .title + " @" + .author + " (#" + (.number | tostring) + ")"),
+              ""
+            else
+              empty
+            end
+        ' "$RELEASE_LABELS_CONFIG_PATH" > "$changes_file"
+
+        {
+          echo "## Changes"
+          echo
+          if [[ -s "$changes_file" ]]; then
+            cat "$changes_file"
+          else
+            echo "- No categorized pull requests found."
+            echo
           fi
 
-          echo "Waiting for $RELEASE_DRAFTER_CONFIG_PATH to be available on $DEFAULT_BRANCH (attempt $attempt/10)."
-          sleep 3
-        done
+          if [[ -n "$previous_tag" ]]; then
+            echo "## 🕵️‍♀️ Full commit logs"
+            echo
+            echo "- https://github.com/$GITHUB_REPOSITORY/compare/$previous_tag...$next_version"
+          fi
+        } > "$body_file"
 
-        echo "Release Drafter config $RELEASE_DRAFTER_CONFIG_PATH was not found on default branch '$DEFAULT_BRANCH'." >&2
-        exit 1
+        draft="true"
+        if [[ "$PUBLISH" == "true" ]]; then
+          draft="false"
+        fi
 
-    - name: Create or update release draft
-      if: ${{ inputs.run-release-drafter == 'true' }}
-      uses: release-drafter/release-drafter@v6
-      with:
-        config-name: ${{ inputs.release-drafter-config-name }}
-        publish: ${{ inputs.publish }}
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+          --jq ".[] | select(.tag_name == \"$next_version\") | .id" | head -n 1 || true)"
+
+        payload_file="$(mktemp)"
+        jq -n \
+          --arg tag_name "$next_version" \
+          --arg name "$next_version" \
+          --arg target_commitish "$TARGET_BRANCH" \
+          --rawfile body "$body_file" \
+          --argjson draft "$draft" \
+          '{
+            tag_name: $tag_name,
+            name: $name,
+            target_commitish: $target_commitish,
+            body: $body,
+            draft: $draft,
+            prerelease: false
+          }' > "$payload_file"
+
+        if [[ -n "$release_id" ]]; then
+          echo "Updating release draft for $next_version."
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --input "$payload_file" >/dev/null
+        else
+          echo "Creating release draft for $next_version."
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" --input "$payload_file" >/dev/null
+        fi
