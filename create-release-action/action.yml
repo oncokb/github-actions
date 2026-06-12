@@ -91,7 +91,7 @@ runs:
 
         prs_file="$(mktemp)"
         gh api -X GET --paginate "search/issues" -f q="$search_query" \
-          --jq '.items[] | {number, title, author: .user.login, labels: [.labels[].name]}' \
+          --jq '.items[] | {number, title, author: .user.login, closed_at, labels: [.labels[].name]}' \
           | jq -s '.' > "$prs_file"
 
         infer_version_level_from_labels() {
@@ -193,35 +193,76 @@ runs:
 
         body_file="$(mktemp)"
         changes_file="$(mktemp)"
+        categorized_changes_json_file="$(mktemp)"
+        categorized_pr_numbers_file="$(mktemp)"
+        raw_uncategorized_changes_file="$(mktemp)"
+        uncategorized_changes_file="$(mktemp)"
 
-        jq -r --slurpfile prs "$prs_file" '
+        jq --slurpfile prs "$prs_file" '
           def norm: ascii_downcase | gsub("^\\s+|\\s+$"; "");
           def has_any_label($wanted):
             (.labels // [] | map(norm)) as $labels
             | any($wanted[]; . as $label | $labels | index($label));
 
           $prs[0] as $all_prs
-          | .categories[]
-          | . as $category
-          | ($category.labels | map(norm)) as $wanted
-          | [$all_prs[] | select(has_any_label($wanted))]
-          | unique_by(.number)
-          | if length > 0 then
-              "### " + $category.title,
-              (.[] | "- " + .title + " @" + .author + " (#" + (.number | tostring) + ")"),
-              ""
-            else
-              empty
-            end
-        ' "$RELEASE_LABELS_CONFIG_PATH" > "$changes_file"
+          | [
+              .categories[]
+              | . as $category
+              | ($category.labels | map(norm)) as $wanted
+              | {
+                  title: $category.title,
+                  prs: ([$all_prs[] | select(has_any_label($wanted))] | unique_by(.number) | sort_by(.closed_at // ""))
+                }
+            ]
+        ' "$RELEASE_LABELS_CONFIG_PATH" > "$categorized_changes_json_file"
+
+        jq -r '
+          .[]
+          | select(.prs | length > 0)
+          | "### " + .title,
+            (.prs[] | "- " + .title + " @" + .author + " (#" + (.number | tostring) + ")"),
+            ""
+        ' "$categorized_changes_json_file" > "$changes_file"
+
+        jq -r '.[].prs[].number' "$categorized_changes_json_file" > "$categorized_pr_numbers_file"
+
+        if [[ -n "$previous_tag" ]]; then
+          git log --format='%s' "$previous_tag..$TARGET_BRANCH" > "$raw_uncategorized_changes_file" || true
+        else
+          git log --format='%s' "$TARGET_BRANCH" > "$raw_uncategorized_changes_file" || true
+        fi
+
+        while IFS= read -r commit_subject; do
+          matched_categorized_pr="false"
+
+          while IFS= read -r pr_number; do
+            if [[ -n "$pr_number" && ( "$commit_subject" =~ \(\#${pr_number}\) || "$commit_subject" =~ [Pp]ull\ request\ \#${pr_number} ) ]]; then
+              matched_categorized_pr="true"
+              break
+            fi
+          done < "$categorized_pr_numbers_file"
+
+          if [[ "$matched_categorized_pr" == "false" ]]; then
+            echo "- $commit_subject" >> "$uncategorized_changes_file"
+          fi
+        done < "$raw_uncategorized_changes_file"
 
         {
           echo "## Changes"
           echo
           if [[ -s "$changes_file" ]]; then
             cat "$changes_file"
-          else
-            echo "- No categorized pull requests found."
+          fi
+
+          if [[ -s "$uncategorized_changes_file" ]]; then
+            echo "### Uncategorized Changes"
+            echo
+            cat "$uncategorized_changes_file"
+            echo
+          fi
+
+          if [[ ! -s "$changes_file" && ! -s "$uncategorized_changes_file" ]]; then
+            echo "- No changes found."
             echo
           fi
 

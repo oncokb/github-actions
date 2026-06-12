@@ -85,6 +85,9 @@ The generated release body uses:
 ### <category title>
 - <PR title> @<author> (#<number>)
 
+### Uncategorized Changes
+- <commit subject>
+
 ## 🕵️‍♀️ Full commit logs
 
 - https://github.com/<caller-repo>/compare/<previous-tag>...<next-version>
