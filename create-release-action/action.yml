@@ -16,7 +16,7 @@ inputs:
     default: ""
 
   release-drafter-config-path:
-    description: "Path to the Release Drafter config file to update"
+    description: "Path where the shared Release Drafter config should be written"
     required: false
     default: ".github/release-drafter.yml"
 
@@ -39,21 +39,6 @@ inputs:
     description: "Placeholder used by Release Drafter for the next patch version"
     required: false
     default: "NEXT_PATCH_VERSION"
-
-  major-labels:
-    description: "Comma-separated PR labels that should trigger a major release"
-    required: false
-    default: "major"
-
-  minor-labels:
-    description: "Comma-separated PR labels that should trigger a minor release"
-    required: false
-    default: "feature"
-
-  patch-labels:
-    description: "Comma-separated PR labels that should trigger a patch release"
-    required: false
-    default: "fix,documentation"
 
   default-version-level:
     description: "Version level to use when no merged PR labels match"
@@ -107,22 +92,37 @@ runs:
         set -euo pipefail
 
         EXPLICIT_VERSION_LEVEL="${{ inputs.version-level }}"
+        RELEASE_LABELS_CONFIG_PATH="$GITHUB_ACTION_PATH/../release-labels.json"
         RELEASE_DRAFTER_CONFIG_PATH="${{ inputs.release-drafter-config-path }}"
         RELEASE_DRAFTER_MAJOR="${{ inputs.release-drafter-major-token }}"
         RELEASE_DRAFTER_MINOR="${{ inputs.release-drafter-minor-token }}"
         RELEASE_DRAFTER_PATCH="${{ inputs.release-drafter-patch-token }}"
-        MAJOR_LABELS="${{ inputs.major-labels }}"
-        MINOR_LABELS="${{ inputs.minor-labels }}"
-        PATCH_LABELS="${{ inputs.patch-labels }}"
         DEFAULT_VERSION_LEVEL="${{ inputs.default-version-level }}"
 
-        if [[ ! -f "$RELEASE_DRAFTER_CONFIG_PATH" ]]; then
-          echo "Release Drafter config not found: $RELEASE_DRAFTER_CONFIG_PATH" >&2
+        if [[ ! -f "$RELEASE_LABELS_CONFIG_PATH" ]]; then
+          echo "Shared release labels config not found." >&2
           exit 1
         fi
 
-        normalize_list() {
-          echo "$1" | tr "[:upper:]" "[:lower:]" | tr "," "\n" | xargs -n1 echo 2>/dev/null || true
+        mkdir -p "$(dirname "$RELEASE_DRAFTER_CONFIG_PATH")"
+        {
+          echo "name-template: '\$NEXT_MINOR_VERSION'"
+          echo "tag-template: '\$NEXT_MINOR_VERSION'"
+          echo "categories:"
+          jq -r '.categories[] | "  - title: " + (.title | @json), "    labels:", (.labels[] | "      - " + (. | @json))' "$RELEASE_LABELS_CONFIG_PATH"
+          echo "change-template: '- \$TITLE @\$AUTHOR (#\$NUMBER)'"
+          echo "template: |"
+          echo "  ## Changes"
+          echo
+          echo "  \$CHANGES"
+          echo
+          echo "  ## 🕵️‍♀️ Full commit logs"
+          echo
+          echo "  - https://github.com/$GITHUB_REPOSITORY/compare/\$PREVIOUS_TAG...\$NEXT_MINOR_VERSION"
+        } > "$RELEASE_DRAFTER_CONFIG_PATH"
+
+        normalize_labels() {
+          tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d'
         }
 
         label_matches() {
@@ -143,9 +143,9 @@ runs:
           local labels=""
           local major_labels minor_labels patch_labels
 
-          major_labels="$(normalize_list "$MAJOR_LABELS")"
-          minor_labels="$(normalize_list "$MINOR_LABELS")"
-          patch_labels="$(normalize_list "$PATCH_LABELS")"
+          major_labels="$(jq -r '.majorLabels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_labels)"
+          minor_labels="$(jq -r '.categories[] | select(.versionLevel == "minor") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_labels)"
+          patch_labels="$(jq -r '.categories[] | select(.versionLevel == "patch") | .labels[]' "$RELEASE_LABELS_CONFIG_PATH" | normalize_labels)"
 
           latest_release_date="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq ".published_at" 2>/dev/null || true)"
 
@@ -166,7 +166,7 @@ runs:
           fi
 
           while IFS= read -r label; do
-            label="$(echo "$label" | xargs)"
+            label="$(echo "$label" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             if label_matches "$label" "$major_labels"; then
               VERSION_LEVEL="major"
               return
@@ -174,7 +174,7 @@ runs:
           done <<< "$labels"
 
           while IFS= read -r label; do
-            label="$(echo "$label" | xargs)"
+            label="$(echo "$label" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             if label_matches "$label" "$minor_labels"; then
               VERSION_LEVEL="minor"
               return
@@ -182,7 +182,7 @@ runs:
           done <<< "$labels"
 
           while IFS= read -r label; do
-            label="$(echo "$label" | xargs)"
+            label="$(echo "$label" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             if label_matches "$label" "$patch_labels"; then
               VERSION_LEVEL="patch"
               return

@@ -1,0 +1,50 @@
+{
+  "majorLabels": ["major"],
+  "categories": [
+    {
+      "title": "🧬 Features",
+      "versionLevel": "minor",
+      "labels": ["feature"]
+    },
+    {
+      "title": "✨ Enhancements",
+      "versionLevel": "minor",
+      "labels": ["enhancement"]
+    },
+    {
+      "title": "🐛 Bug Fixes",
+      "versionLevel": "patch",
+      "labels": ["fix", "bugfix", "bug"]
+    },
+    {
+      "title": "🏎 Performance Tweaks",
+      "versionLevel": "patch",
+      "labels": ["performance"]
+    },
+    {
+      "title": "🎨 Style Tweaks",
+      "versionLevel": "patch",
+      "labels": ["style tweak"]
+    },
+    {
+      "title": "📘 Documentation",
+      "versionLevel": "patch",
+      "labels": ["documentation"]
+    },
+    {
+      "title": "🧹 Cleanup",
+      "versionLevel": "patch",
+      "labels": ["cleanup"]
+    },
+    {
+      "title": "👷‍♀️ Testing, Configuration & Deployment",
+      "versionLevel": "patch",
+      "labels": ["devops"]
+    },
+    {
+      "title": "🧰 Maintenance",
+      "versionLevel": "patch",
+      "labels": ["chore", "dependencies"]
+    }
+  ]
+}

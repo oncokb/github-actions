@@ -13,7 +13,14 @@ runs:
       run: |
         set -euo pipefail
 
-        REQUIRED_LABELS="major,fix,feature,documentation"
+        RELEASE_LABELS_CONFIG_PATH="$GITHUB_ACTION_PATH/../release-labels.json"
+
+        if [[ ! -f "$RELEASE_LABELS_CONFIG_PATH" ]]; then
+          echo "Shared release labels config not found." >&2
+          exit 1
+        fi
+
+        REQUIRED_LABELS="$(jq -r '.majorLabels[], .categories[].labels[]' "$RELEASE_LABELS_CONFIG_PATH" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d')"
 
         if [[ ! -f "$GITHUB_EVENT_PATH" ]]; then
           echo "GitHub event payload not found." >&2
@@ -35,13 +42,16 @@ runs:
         fi
 
         while IFS= read -r current_label; do
-          case "$current_label" in
-            major|fix|feature|documentation)
+          current_label="$(echo "$current_label" | tr "[:upper:]" "[:lower:]" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          while IFS= read -r required_label; do
+            if [[ "$current_label" == "$required_label" ]]; then
               echo "Required label found: $current_label"
               exit 0
-              ;;
-          esac
+            fi
+          done <<< "$REQUIRED_LABELS"
         done <<< "$PR_LABELS"
 
-        echo "PR must have one of: $REQUIRED_LABELS" >&2
+        echo "PR must have one of:" >&2
+        echo "$REQUIRED_LABELS" >&2
         exit 1

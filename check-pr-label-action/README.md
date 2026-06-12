@@ -1,7 +1,7 @@
 # Check PR Label GitHub Action
 
 Use this composite action to require pull requests to include one of the release
-category labels: `major`, `fix`, `feature`, or `documentation`.
+category labels used by the shared Release Drafter template.
 
 ## Usage
 
@@ -24,4 +24,5 @@ jobs:
 ## Required Labels
 
 The action reads labels directly from the `pull_request` event payload. It does
-not require any inputs.
+not require any inputs. Accepted labels come from the root-level
+`release-labels.json` file.
